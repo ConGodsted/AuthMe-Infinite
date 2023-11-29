@@ -1,68 +1,63 @@
 package me.axieum.mcmod.authme.mixin;
 
+import me.axieum.mcmod.authme.AuthMe;
+import me.axieum.mcmod.authme.api.Status;
+import me.axieum.mcmod.authme.gui.AuthScreen;
+import me.axieum.mcmod.authme.util.SessionUtil;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.multiplayer.MultiplayerScreen;
+import net.minecraft.client.gui.widget.TexturedButtonWidget;
+import net.minecraft.client.resource.language.I18n;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
+import net.minecraft.util.Identifier;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.multiplayer.MultiplayerScreen;
-import net.minecraft.client.gui.tooltip.Tooltip;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-
-import me.axieum.mcmod.authme.api.gui.widget.AuthButtonWidget;
-import me.axieum.mcmod.authme.api.util.SessionUtils;
-import me.axieum.mcmod.authme.impl.gui.AuthMethodScreen;
-import static me.axieum.mcmod.authme.impl.AuthMe.CONFIG;
-import static me.axieum.mcmod.authme.impl.AuthMe.LOGGER;
-import static me.axieum.mcmod.authme.impl.AuthMe.getConfig;
-
-/**
- * Injects a button into the multiplayer screen to open the authentication screen.
- */
 @Mixin(MultiplayerScreen.class)
 public abstract class MultiplayerScreenMixin extends Screen
 {
-    private MultiplayerScreenMixin(Text title)
+    private static Status status = Status.UNKNOWN;
+    private static TexturedButtonWidget authButton;
+
+    protected MultiplayerScreenMixin(Text title) { super(title); }
+
+    @Inject(method = "init", at = @At("TAIL"))
+    private void init(CallbackInfo info)
     {
-        super(title);
+        // Inject the authenticate button at top left, using lock texture or fallback text
+        AuthMe.LOGGER.debug("Injecting authentication button into multiplayer screen");
+        assert client != null;
+        authButton = new TexturedButtonWidget(6,
+                6,
+                20,
+                20,
+                0,
+                146,
+                20,
+                new Identifier("minecraft:textures/gui/widgets.png"),
+                256,
+                256,
+                button ->  client.openScreen(new AuthScreen(this)),
+                I18n.translate("gui.authme.multiplayer.button.auth"));
+        this.addButton(authButton);
+
+        // Fetch current session status
+        MultiplayerScreenMixin.status = Status.UNKNOWN;
+        SessionUtil.getStatus().thenAccept(status -> MultiplayerScreenMixin.status = status);
     }
 
-    /**
-     * Injects into the creation of the screen and adds the authentication button.
-     *
-     * @param ci injection callback info
-     */
-    @Inject(method = "init", at = @At("HEAD"))
-    private void init(CallbackInfo ci)
+    @Inject(method = "render", at = @At("TAIL"))
+    public void render(int mouseX, int mouseY, float delta, CallbackInfo info)
     {
-        LOGGER.info("Adding auth button to the multiplayer screen");
-        assert client != null;
-
-        // Create and add the button to the screen
-        addDrawableChild(
-            new AuthButtonWidget(
-                this,
-                getConfig().authButton.x,
-                getConfig().authButton.y,
-                btn -> client.setScreen(new AuthMethodScreen(this)),
-                // Optionally, enable button dragging
-                getConfig().authButton.draggable ? btn -> {
-                    // Sync configuration with the updated button position
-                    LOGGER.info("Moved the auth button to {}, {}", btn.getX(), btn.getY());
-                    getConfig().authButton.x = btn.getX();
-                    getConfig().authButton.y = btn.getY();
-                    CONFIG.save();
-                } : null,
-                // Add a tooltip to greet the player
-                Tooltip.of(Text.translatable(
-                    "gui.authme.button.auth.tooltip",
-                    Text.literal(SessionUtils.getSession().getUsername()).formatted(Formatting.YELLOW)
-                )),
-                // Non-visible text, useful for screen narrator
-                Text.translatable("gui.authme.button.auth")
-            )
-        );
+        // Draw status text/icon on button
+        this.drawString(MinecraftClient.getInstance().textRenderer,
+                Formatting.BOLD + status.toString(),
+                authButton.x + authButton.getWidth() - 6,
+                authButton.y - 1,
+                status.color);
     }
 }
